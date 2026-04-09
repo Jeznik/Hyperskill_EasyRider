@@ -13,10 +13,42 @@ class EasyRider:
 
     def bus_line_info(self):
         buses_df = pd.DataFrame(json.loads(self.buses_and_stops))
+
+        # Count number of stops per bus
+        stop_counts = buses_df.groupby("bus_id").agg(total_stops=("stop_id", "count"))
+
+        # Check if route contains both Start and Finish type stops
+        start_finish_counts = buses_df.groupby("bus_id")["stop_type"].agg(
+            has_start=lambda s: (s == "S").any(),
+            has_finish=lambda s: (s == "F").any()
+        )
+        start_finish_counts["has_start_and_finish"] = (
+                start_finish_counts["has_start"] & start_finish_counts["has_finish"]
+        )
+
+        # Combine summary stats into one DataFrame
+        summary_df = pd.concat([stop_counts, start_finish_counts], axis=1)
+
         print('\nLine names and number of stops:')
-        stop_counts = buses_df.groupby("bus_id")["stop_id"].count()
-        for bus_id, count in stop_counts.items():
-            print(f"bus_id: {bus_id} stops: {count}")
+        for bus_id, row in summary_df.iterrows():
+            print(f"bus_id: {bus_id} stops: {row['total_stops']}")
+            if not row["has_start_and_finish"]:
+                print(f"There is no start or end stop for the line: {bus_id}")
+
+        if not (~start_finish_counts["has_start_and_finish"]).any():
+            start_stops = buses_df[buses_df["stop_type"] == "S"]["stop_name"].unique().tolist()
+            finish_stops = buses_df[buses_df["stop_type"] == "F"]["stop_name"].unique().tolist()
+            transfer_stops = (
+                buses_df.groupby("stop_name")["bus_id"]
+                .nunique()
+                .loc[lambda s: s > 1]
+                .index
+                .tolist()
+            )
+            print(f"\nStart stops: {len(start_stops)} {sorted(start_stops)}")
+            print(f"Transfer stops: {len(transfer_stops)} {sorted(transfer_stops)}")
+            print(f"Finish stops: {len(finish_stops)} {sorted(finish_stops)}")
+
 
     def field_validation(self):
         # parse JSON into list
