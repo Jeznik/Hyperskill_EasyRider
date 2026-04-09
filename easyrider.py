@@ -1,4 +1,6 @@
 import json
+import re
+import pandas as pd
 
 class EasyRider:
     def __init__(self, buses_and_stops):
@@ -7,36 +9,92 @@ class EasyRider:
     def run(self):
         validation_results = self.field_validation()
         self.print_validation_errors(validation_results)
+        self.bus_line_info()
 
+    def bus_line_info(self):
+        buses_df = pd.DataFrame(json.loads(self.buses_and_stops))
+        print('\nLine names and number of stops:')
+        stop_counts = buses_df.groupby("bus_id")["stop_id"].count()
+        for bus_id, count in stop_counts.items():
+            print(f"bus_id: {bus_id} stops: {count}")
 
     def field_validation(self):
+        # parse JSON into list
         bus_data = json.loads(self.buses_and_stops)
-        schema_error_check = {
-            "bus_id": {"Required": True, "Type": "integer", "error_count": 0 }, # required, type, error_count, length
-            "stop_id": {"Required": True, "Type": "integer", "error_count": 0 },
-            "stop_name": {"Required": True, "Type": "string", "error_count": 0 },
-            "next_stop": {"Required": True, "Type": "integer", "error_count": 0 },
-            "stop_type": {"Required": False, "Type": "char", "error_count": 0 },
-            "a_time": {"Required": True, "Type": "string", "error_count": 0 }
+
+        # The 'rules' to validate against
+        schema = {
+            "bus_id": {"required": True, "type": "integer"},
+            "stop_id": {"required": True, "type": "integer"},
+            "stop_name": {
+                "required": True,
+                "type": "string",
+                # One or more Proper case words followed by a discreet suffix
+                "format": r'^(?:[A-Z][a-zA-Z]*\s)+(?:Road|Avenue|Boulevard|Street)$',
+            },
+            "next_stop": {"required": True, "type": "integer"},
+            "stop_type": {
+                "required": False,
+                "type": "char",
+                "format": r'^[SOF]$',
+            },
+            "a_time": {
+                "required": True,
+                "type": "string",
+                # Military time format
+                "format": r'^(?:[01]\d|2[0-3]):[0-5]\d$',
+            },
         }
+
+        error_counts = {field: 0 for field in schema}
+
         for bus_stop_bus in bus_data:
-            # Check for missing required fields
-            for field, rules in schema_error_check.items():
-                if field not in bus_stop_bus:
-                    if rules["Required"]:
-                        rules["error_count"] += 1
-                    continue
+            self._check_required_fields(bus_stop_bus, schema, error_counts)
+            self._check_types(bus_stop_bus, schema, error_counts)
+            self._check_formats(bus_stop_bus, schema, error_counts)
 
-            # Check for incorrect data types
-                if rules["Type"] == "integer" and not isinstance(bus_stop_bus[field], int):
-                    rules["error_count"] += 1
-                elif rules["Type"] == "string":
-                    if not isinstance(bus_stop_bus[field], str) or len(bus_stop_bus[field]) == 0:
-                        rules["error_count"] += 1
-                if rules["Type"] == "char" and not is_char(bus_stop_bus[field]):
-                    rules["error_count"] += 1
+        return {
+            field: {
+                "Required": rules["required"],
+                "Type": rules["type"],
+                "error_count": error_counts[field],
+            }
+            for field, rules in schema.items()
+        }
 
-        return schema_error_check
+    def _check_required_fields(self, bus_stop_bus, schema, error_counts):
+        for field, rules in schema.items():
+            if rules["required"] and field not in bus_stop_bus:
+                error_counts[field] += 1
+
+    def _check_types(self, bus_stop_bus, schema, error_counts):
+        for field, rules in schema.items():
+            # Avoid double counting error if both required and type checks fail
+            if field not in bus_stop_bus:
+                continue
+
+            value = bus_stop_bus[field]
+            expected_type = rules["type"]
+
+            if expected_type == "integer" and not isinstance(value, int):
+                error_counts[field] += 1
+            # Must be a non zero length string (value is truthy / falsy)
+            elif expected_type == "string" and (not isinstance(value, str) or not value):
+                error_counts[field] += 1
+            # The one char field in the schema is not required so can be zero length
+            elif expected_type == "char" and not is_char(value):
+                error_counts[field] += 1
+
+    def _check_formats(self, bus_stop_bus, schema, error_counts):
+        for field, rules in schema.items():
+            # Avoid double counting error if both required and format checks fail
+            if field not in bus_stop_bus or "format" not in rules:
+                continue
+
+            value = bus_stop_bus[field]
+            # If the value is a non-zero length string, then check if it matches the regex
+            if isinstance(value, str) and value and not re.match(rules["format"], value):
+                error_counts[field] += 1
 
     def print_validation_errors(self, validation_results):
         total_errors = sum(errors['error_count'] for field, errors in validation_results.items())
@@ -45,6 +103,7 @@ class EasyRider:
             print(f"{field}: {errors['error_count']}")
 
 def is_char(x):
+    # A valid "char" is either an empty string or a single-character string.
     return isinstance(x, str) and len(x) <= 1
 
 def main():
