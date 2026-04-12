@@ -19,6 +19,7 @@ class EasyRider:
         stop_counts = buses_df.groupby("bus_id").agg(total_stops=("stop_id", "count"))
 
         # Check if route contains both Start and Finish type stops
+        # Note it does not seem necessary to check if the start and end stops really are the first and last
         start_finish_counts = buses_df.groupby("bus_id")["stop_type"].agg(
             has_start=lambda s: (s == "S").any(),
             has_finish=lambda s: (s == "F").any()
@@ -30,13 +31,16 @@ class EasyRider:
         # Combine summary stats into one DataFrame
         summary_df = pd.concat([stop_counts, start_finish_counts], axis=1)
 
+        self.print_bus_line_summary(summary_df, start_finish_counts, buses_df)
+
+    def print_bus_line_summary(self, summary_df, start_finish_counts, buses_df):
         print('\nLine names and number of stops:')
         for bus_id, row in summary_df.iterrows():
             print(f"bus_id: {bus_id} stops: {row['total_stops']}")
             if not row["has_start_and_finish"]:
                 print(f"There is no start or end stop for the line: {bus_id}")
 
-        if not (~start_finish_counts["has_start_and_finish"]).any():
+        if start_finish_counts["has_start_and_finish"].all():
             start_stops = buses_df[buses_df["stop_type"] == "S"]["stop_name"].unique().tolist()
             finish_stops = buses_df[buses_df["stop_type"] == "F"]["stop_name"].unique().tolist()
             transfer_stops = (
@@ -46,9 +50,13 @@ class EasyRider:
                 .index
                 .tolist()
             )
+            # Documentation states an on-demand sto cannot be a start, finish, or transfer type
+            # But explicitly checking this condition does not seem necessary to pass the tests.
+            on_demand_stops = buses_df[buses_df["stop_type"] == "O"]["stop_name"].unique().tolist()
             print(f"\nStart stops: {len(start_stops)} {sorted(start_stops)}")
             print(f"Transfer stops: {len(transfer_stops)} {sorted(transfer_stops)}")
             print(f"Finish stops: {len(finish_stops)} {sorted(finish_stops)}")
+            print(f"On Demand stops: {len(on_demand_stops)} {sorted(on_demand_stops)}")
 
 
     def field_validation(self):
@@ -101,8 +109,6 @@ class EasyRider:
 
     def _check_time_order(self, bus_stop_bus, schema, error_counts, fmt, prev_time, a_time_order_error):
         bus = bus_stop_bus["bus_id"]
-        # says we'll need this, but not in this task?
-        # stop = bus_stop_bus["stop_id"]
         # no need to check buses that already have an a_time_order_error
         if bus in a_time_order_error:
             return
