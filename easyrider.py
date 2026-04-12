@@ -1,6 +1,7 @@
 import json
 import re
 import pandas as pd
+from datetime import datetime
 
 class EasyRider:
     def __init__(self, buses_and_stops):
@@ -79,11 +80,15 @@ class EasyRider:
         }
 
         error_counts = {field: 0 for field in schema}
+        fmt = "%H:%M"
+        prev_time = {}
+        a_time_order_error = []
 
         for bus_stop_bus in bus_data:
             self._check_required_fields(bus_stop_bus, schema, error_counts)
             self._check_types(bus_stop_bus, schema, error_counts)
             self._check_formats(bus_stop_bus, schema, error_counts)
+            self._check_time_order(bus_stop_bus, schema, error_counts, fmt, prev_time, a_time_order_error)
 
         return {
             field: {
@@ -93,6 +98,27 @@ class EasyRider:
             }
             for field, rules in schema.items()
         }
+
+    def _check_time_order(self, bus_stop_bus, schema, error_counts, fmt, prev_time, a_time_order_error):
+        bus = bus_stop_bus["bus_id"]
+        # says we'll need this, but not in this task?
+        # stop = bus_stop_bus["stop_id"]
+        # no need to check buses that already have an a_time_order_error
+        if bus in a_time_order_error:
+            return
+
+        try:
+            t = datetime.strptime(bus_stop_bus["a_time"], fmt)
+            if bus in prev_time and prev_time[bus] >= t:
+                a_time_order_error.append(bus)
+                error_counts["a_time"] += 1
+                return
+            prev_time[bus] = t
+
+        except ValueError:
+            # don't double count format errors for a_time
+            a_time_order_error.append(bus)
+            return
 
     def _check_required_fields(self, bus_stop_bus, schema, error_counts):
         for field, rules in schema.items():
